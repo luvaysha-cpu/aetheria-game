@@ -1,0 +1,902 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Aetheria: Realm of Discovery (3D Open World Survival)</title>
+    <!-- Tailwind CSS for modern HUD & UI -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Three.js for 3D graphics -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- FontAwesome icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap');
+        
+        * {
+            user-select: none;
+            -webkit-user-select: none;
+            font-family: 'Outfit', sans-serif;
+        }
+
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #090a0f;
+        }
+
+        #game-canvas {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+
+        /* Glassmorphism UI effects */
+        .glass-panel {
+            background: rgba(15, 23, 42, 0.75);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .glass-panel-glow {
+            background: rgba(15, 23, 42, 0.85);
+            backdrop-filter: blur(16px);
+            border: 1px solid rgba(168, 85, 247, 0.4);
+            box-shadow: 0 0 35px rgba(168, 85, 247, 0.25);
+        }
+
+        /* Crosshair */
+        #crosshair {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 12px;
+            height: 12px;
+            pointer-events: none;
+        }
+
+        #crosshair::before, #crosshair::after {
+            content: '';
+            position: absolute;
+            background: rgba(255, 255, 255, 0.8);
+            box-shadow: 0 0 4px rgba(0,0,0,0.5);
+        }
+
+        #crosshair::before { top: 5px; left: 0; width: 12px; height: 2px; }
+        #crosshair::after { top: 0; left: 5px; width: 2px; height: 12px; }
+
+        /* Custom Scrollbars */
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: rgba(0,0,0,0.2);
+        }
+        ::-webkit-scrollbar-thumb {
+            background: rgba(147, 51, 234, 0.5);
+            border-radius: 3px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: rgba(147, 51, 234, 0.8);
+        }
+
+        .slot-active {
+            border-color: #f59e0b !important;
+            transform: scale(1.08);
+            box-shadow: 0 0 15px rgba(245, 158, 11, 0.5);
+        }
+
+        .blood-moon-overlay {
+            animation: pulse-red 2s infinite ease-in-out;
+        }
+
+        @keyframes pulse-red {
+            0%, 100% { box-shadow: inset 0 0 50px rgba(239, 68, 68, 0.2); }
+            50% { box-shadow: inset 0 0 120px rgba(239, 68, 68, 0.5); }
+        }
+    </style>
+</head>
+<body class="relative overflow-hidden select-none">
+
+    <!-- 3D Canvas -->
+    <canvas id="game-canvas"></canvas>
+
+    <!-- Crosshair -->
+    <div id="crosshair"></div>
+
+    <!-- Blood Moon Screen FX -->
+    <div id="blood-moon-fx" class="pointer-events-none fixed inset-0 hidden z-10 blood-moon-overlay"></div>
+
+    <!-- HUD Overlay -->
+    <div id="hud" class="absolute inset-0 pointer-events-none z-20 flex flex-col justify-between p-4 md:p-6">
+        
+        <!-- Top HUD Bar -->
+        <div class="flex justify-between items-start w-full">
+            <!-- Stats & Level -->
+            <div class="flex flex-col gap-2">
+                <!-- Health Bar -->
+                <div class="glass-panel rounded-xl p-3 w-64 md:w-80 pointer-events-auto">
+                    <div class="flex justify-between items-center text-xs font-bold text-slate-300 mb-1">
+                        <span><i class="fa-solid fa-heart text-red-500 mr-1.5"></i> VITALITY</span>
+                        <span id="hp-text">100 / 100</span>
+                    </div>
+                    <div class="w-full h-3 bg-slate-900/80 rounded-full overflow-hidden p-0.5 border border-slate-700">
+                        <div id="hp-bar" class="h-full bg-gradient-to-r from-red-600 to-rose-400 rounded-full transition-all duration-300" style="width: 100%;"></div>
+                    </div>
+                </div>
+
+                <!-- Stamina / Energy Bar -->
+                <div class="glass-panel rounded-xl p-3 w-64 md:w-80 pointer-events-auto">
+                    <div class="flex justify-between items-center text-xs font-bold text-slate-300 mb-1">
+                        <span><i class="fa-solid fa-bolt text-amber-400 mr-1.5"></i> STAMINA</span>
+                        <span id="stamina-text">100 / 100</span>
+                    </div>
+                    <div class="w-full h-3 bg-slate-900/80 rounded-full overflow-hidden p-0.5 border border-slate-700">
+                        <div id="stamina-bar" class="h-full bg-gradient-to-r from-amber-500 to-yellow-300 rounded-full transition-all duration-150" style="width: 100%;"></div>
+                    </div>
+                </div>
+
+                <!-- XP & Level Badge -->
+                <div class="flex items-center gap-3">
+                    <div class="glass-panel rounded-xl px-3 py-1.5 flex items-center gap-2 pointer-events-auto">
+                        <div class="w-7 h-7 rounded-lg bg-indigo-600 flex items-center justify-center text-xs font-black text-white" id="player-level">1</div>
+                        <div class="flex flex-col">
+                            <span class="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Level Progress</span>
+                            <div class="w-28 h-1.5 bg-slate-800 rounded-full overflow-hidden mt-0.5">
+                                <div id="xp-bar" class="h-full bg-indigo-400 rounded-full transition-all duration-300" style="width: 0%;"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Top Right: Time, Biome & Quest Target -->
+            <div class="flex flex-col items-end gap-2">
+                <!-- Clock & Biome Widget -->
+                <div class="glass-panel rounded-xl p-3 flex items-center gap-4 pointer-events-auto border-amber-500/20">
+                    <div class="flex items-center gap-2 text-amber-400">
+                        <i id="clock-icon" class="fa-solid fa-sun text-xl animate-pulse"></i>
+                        <span id="clock-text" class="font-mono font-bold text-lg text-slate-100">12:00</span>
+                    </div>
+                    <div class="h-8 w-px bg-slate-700"></div>
+                    <div class="flex flex-col text-right">
+                        <span id="biome-name" class="text-xs font-black tracking-wider uppercase text-emerald-400">Forest Biome</span>
+                        <span id="world-seed-text" class="text-[10px] text-slate-400">Seed: #84920</span>
+                    </div>
+                </div>
+
+                <!-- Active Quest Tracker -->
+                <div class="glass-panel rounded-xl p-3 w-64 md:w-72 pointer-events-auto border-l-4 border-l-cyan-400">
+                    <div class="flex items-center justify-between text-xs font-extrabold text-cyan-400 uppercase tracking-wider mb-1">
+                        <span><i class="fa-solid fa-scroll mr-1"></i> Current Quest</span>
+                        <span id="quest-reward" class="text-amber-400">+50 XP</span>
+                    </div>
+                    <div id="quest-desc" class="text-xs text-slate-200 font-medium">Harvest 10 Wood from trees.</div>
+                    <div class="w-full bg-slate-800 h-1.5 rounded-full mt-2 overflow-hidden">
+                        <div id="quest-progress-bar" class="bg-cyan-400 h-full w-0 transition-all duration-300"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Notification Banner (Center Screen Floating) -->
+        <div id="toast-banner" class="self-center transform -translate-y-12 opacity-0 transition-all duration-500 pointer-events-none glass-panel-glow px-6 py-2.5 rounded-full flex items-center gap-3">
+            <i id="toast-icon" class="fa-solid fa-star text-amber-400 text-lg"></i>
+            <span id="toast-msg" class="text-sm font-bold text-slate-100">Quest Completed!</span>
+        </div>
+
+        <!-- Bottom HUD: Hotbar & Controls guide -->
+        <div class="flex flex-col items-center gap-3 w-full">
+            <!-- Interactive Action Hotbar -->
+            <div class="glass-panel rounded-2xl p-2 flex gap-2 pointer-events-auto shadow-2xl border-slate-700/60" id="hotbar-container">
+                <!-- 9 Slots dynamically built by JS -->
+            </div>
+
+            <!-- Controls Quick Tips -->
+            <div class="text-[11px] text-slate-400/90 font-medium tracking-wide flex gap-4 glass-panel px-4 py-1 rounded-full">
+                <span><b class="text-amber-400">WASD</b> Move</span>
+                <span><b class="text-amber-400">SPACE</b> Jump</span>
+                <span><b class="text-amber-400">L-CLICK</b> Harvest/Attack</span>
+                <span><b class="text-amber-400">R-CLICK</b> Place Block</span>
+                <span><b class="text-amber-400">E</b> Inventory/Crafting</span>
+                <span><b class="text-amber-400">M</b> Shop</span>
+                <span><b class="text-amber-400">V</b> 3rd Person View</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- START / PAUSE OVERLAY -->
+    <div id="start-overlay" class="fixed inset-0 z-50 glass-panel flex flex-col items-center justify-center p-6 text-center">
+        <div class="max-w-xl w-full glass-panel-glow p-8 rounded-3xl flex flex-col items-center gap-6 border-indigo-500/40">
+            <div class="w-20 h-20 rounded-2xl bg-gradient-to-tr from-indigo-600 to-amber-500 flex items-center justify-center text-4xl text-white shadow-lg shadow-indigo-500/30">
+                <i class="fa-solid fa-wand-magic-sparkles"></i>
+            </div>
+            <div>
+                <h1 class="text-4xl md:text-5xl font-black text-transparent bg-clip-text bg-gradient-to-r from-amber-300 via-indigo-300 to-purple-400 tracking-tight">AETHERIA ULTRA</h1>
+                <p class="text-slate-400 text-sm mt-2 font-medium">Enhanced 3D Graphics, Water Shader & Lighting Engine</p>
+            </div>
+
+            <!-- Seed Customizer -->
+<!-- ... existing code ...=========
+        // 3. THREE.JS SCENE SETUP & ENGINE
+        // ==========================================
+        let scene, camera, renderer, clock;
+        let dirLight, hemiLight, ambientLight, sunLightMesh;
+        let playerMesh, petMesh, waterMesh, cloudsGroup;
+        let terrainMesh;
+        let objectsPool = [];
+        let particlesPool = [];
+
+        // Simple Noise Generator Function
+        function pseudoNoise(x, z, seed) {
+            let n = Math.sin(x * 0.04 + seed) * Math.cos(z * 0.04 + seed) * 5.5;
+            n += Math.sin(x * 0.08 - z * 0.08) * 2.5;
+            n += Math.cos(x * 0.15 + z * 0.15) * 1.2;
+            return n;
+        }
+
+        function initThreeScene() {
+            const container = document.getElementById('game-canvas');
+            
+            // Scene & Sky Setup
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x38bdf8);
+            scene.fog = new THREE.FogExp2(0x38bdf8, 0.009);
+
+            // Camera
+            camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 800);
+            
+            // High Performance & High Visual Quality Renderer Settings
+            renderer = new THREE.WebGLRenderer({ canvas: container, antialias: true, powerPreference: "high-performance" });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            renderer.toneMapping = THREE.ACESFilmicToneMapping;
+            renderer.toneMappingExposure = 1.15;
+            renderer.outputEncoding = THREE.sRGBEncoding;
+
+            clock = new THREE.Clock();
+
+            // Dynamic Ambient & Hemisphere Lighting
+            ambientLight = new THREE.AmbientLight(0xdbeafe, 0.45);
+            scene.add(ambientLight);
+
+            hemiLight = new THREE.HemisphereLight(0x38bdf8, 0x1e293b, 0.5);
+            hemiLight.position.set(0, 200, 0);
+            scene.add(hemiLight);
+
+            // Sun / Directional Light & Shadow Quality Enhancements
+            dirLight = new THREE.DirectionalLight(0xffedd5, 1.6);
+            dirLight.position.set(120, 160, 80);
+            dirLight.castShadow = true;
+            dirLight.shadow.mapSize.width = 4096;
+            dirLight.shadow.mapSize.height = 4096;
+            dirLight.shadow.camera.near = 0.5;
+            dirLight.shadow.camera.far = 450;
+            dirLight.shadow.bias = -0.0001;
+            const d = 110;
+            dirLight.shadow.camera.left = -d;
+            dirLight.shadow.camera.right = d;
+            dirLight.shadow.camera.top = d;
+            dirLight.shadow.camera.bottom = -d;
+            scene.add(dirLight);
+
+            // Glowing Sun Billboard Sprite
+            const sunGeo = new THREE.SphereGeometry(6, 16, 16);
+            const sunMat = new THREE.MeshBasicMaterial({ color: 0xfef08a });
+            sunLightMesh = new THREE.Mesh(sunGeo, sunMat);
+            scene.add(sunLightMesh);
+
+            // Build Enhanced Procedural World
+            buildProceduralWorld(GAME.seed);
+            createAnimatedWater();
+            createCloudLayer();
+            createPlayerAvatar();
+            createPetCompanion();
+
+            // Resize listener
+            window.addEventListener('resize', onWindowResize, false);
+        }
+
+        // ==========================================
+        // 4. PROCEDURAL WORLD & BIOME GENERATION (ENHANCED)
+        // ==========================================
+        function buildProceduralWorld(seed) {
+            objectsPool.forEach(obj => scene.remove(obj.mesh));
+            objectsPool = [];
+            if (terrainMesh) scene.remove(terrainMesh);
+
+            const terrainSize = 320;
+            const segments = 160;
+            const geo = new THREE.PlaneGeometry(terrainSize, terrainSize, segments, segments);
+            geo.rotateX(-Math.PI / 2);
+
+            const pos = geo.attributes.position;
+            const colors = [];
+            const cForest = new THREE.Color(0x15803d);
+            const cForestHigh = new THREE.Color(0x4ade80);
+            const cDesert = new THREE.Color(0xf59e0b);
+            const cSnow = new THREE.Color(0xf8fafc);
+            const cVolcanic = new THREE.Color(0x334155);
+
+            for (let i = 0; i < pos.count; i++) {
+                const x = pos.getX(i);
+                const z = pos.getZ(i);
+                
+                let h = pseudoNoise(x, z, seed);
+                pos.setY(i, h);
+
+                // Blend Biome Colors with Terrain Height
+                let col = cForest.clone();
+                if (h > 4) col.lerp(cForestHigh, 0.5);
+                
+                if (x > 50) col.lerp(cDesert, 0.85);
+                else if (x < -50) col.lerp(cSnow, 0.9);
+                else if (z > 60) col.lerp(cVolcanic, 0.85);
+
+                colors.push(col.r, col.g, col.b);
+            }
+
+            geo.computeVertexNormals();
+            geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+
+            const mat = new THREE.MeshStandardMaterial({
+                vertexColors: true,
+                roughness: 0.75,
+                metalness: 0.15,
+                flatShading: true
+            });
+
+            terrainMesh = new THREE.Mesh(geo, mat);
+            terrainMesh.receiveShadow = true;
+            terrainMesh.castShadow = true;
+            scene.add(terrainMesh);
+
+            spawnResourceNodes(seed);
+        }
+
+        function createAnimatedWater() {
+            const waterGeo = new THREE.PlaneGeometry(500, 500, 32, 32);
+            waterGeo.rotateX(-Math.PI / 2);
+            const waterMat = new THREE.MeshStandardMaterial({
+                color: 0x0284c7,
+                roughness: 0.1,
+                metalness: 0.8,
+                transparent: true,
+                opacity: 0.75
+            });
+            waterMesh = new THREE.Mesh(waterGeo, waterMat);
+            waterMesh.position.y = -1.2;
+            scene.add(waterMesh);
+        }
+
+        function createCloudLayer() {
+            cloudsGroup = new THREE.Group();
+            const cloudMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1.0, transparent: true, opacity: 0.85 });
+            for (let i = 0; i < 25; i++) {
+                const group = new THREE.Group();
+                const cloudGeo = new THREE.DodecahedronGeometry(8 + Math.random() * 6, 1);
+                for (let j = 0; j < 4; j++) {
+                    const m = new THREE.Mesh(cloudGeo, cloudMat);
+                    m.position.set((Math.random() - 0.5) * 12, (Math.random() - 0.5) * 4, (Math.random() - 0.5) * 12);
+                    group.add(m);
+                }
+                group.position.set((Math.random() - 0.5) * 400, 45 + Math.random() * 15, (Math.random() - 0.5) * 400);
+                cloudsGroup.add(group);
+            }
+            scene.add(cloudsGroup);
+        }
+
+        // Low-Poly Model Generators (Enhanced Shading)
+        function createTreeMesh() {
+            const group = new THREE.Group();
+            const trunkGeo = new THREE.CylinderGeometry(0.35, 0.6, 3.5, 6);
+            const trunkMat = new THREE.MeshStandardMaterial({ color: 0x451a03, roughness: 0.95 });
+            const trunk = new THREE.Mesh(trunkGeo, trunkMat);
+            trunk.position.y = 1.75;
+            trunk.castShadow = true;
+            trunk.receiveShadow = true;
+            group.add(trunk);
+
+            const folMat = new THREE.MeshStandardMaterial({ color: 0x166534, flatShading: true, roughness: 0.6 });
+            for (let i = 0; i < 3; i++) {
+                const folGeo = new THREE.ConeGeometry(2.5 - i * 0.5, 2.8, 6);
+                const fol = new THREE.Mesh(folGeo, folMat);
+                fol.position.y = 3.2 + i * 1.5;
+                fol.castShadow = true;
+                fol.receiveShadow = true;
+                group.add(fol);
+            }
+            return group;
+        }
+
+        function createRockMesh(isGold = false) {
+            const group = new THREE.Group();
+            const geo = new THREE.DodecahedronGeometry(isGold ? 1.1 : 1.4, 1);
+            const mat = new THREE.MeshStandardMaterial({
+                color: isGold ? 0xf59e0b : 0x64748b,
+                roughness: isGold ? 0.2 : 0.85,
+                metalness: isGold ? 0.9 : 0.1,
+                flatShading: true
+            });
+            const mesh = new THREE.Mesh(geo, mat);
+            mesh.scale.set(1 + Math.random()*0.3, 0.8 + Math.random()*0.4, 1 + Math.random()*0.3);
+            mesh.rotation.set(Math.random(), Math.random(), Math.random());
+            mesh.castShadow = true;
+            mesh.receiveShadow = true;
+            group.add(mesh);
+
+            // Add Glowing Crystal Core for Gold veins
+            if (isGold) {
+                const crystalGeo = new THREE.OctahedronGeometry(0.4, 0);
+                const crystalMat = new THREE.MeshStandardMaterial({ color: 0xfef08a, emissive: 0xf59e0b, emissiveIntensity: 0.8 });
+                const crystal = new THREE.Mesh(crystalGeo, crystalMat);
+                crystal.position.set(0, 0.5, 0);
+                group.add(crystal);
+            }
+
+            return group;
+        }
+
+        function spawnResourceNodes(seed) {
+            const count = 120;
+            for (let i = 0; i < count; i++) {
+                const rx = (Math.random() - 0.5) * 260;
+                const rz = (Math.random() - 0.5) * 260;
+                if (Math.hypot(rx, rz) < 12) continue;
+
+                const ry = pseudoNoise(rx, rz, seed);
+                if (ry < -0.5) continue; // Skip water areas
+
+                const rand = Math.random();
+                let type = 'wood';
+                let mesh;
+
+                if (rand < 0.55) {
+                    type = 'wood';
+                    mesh = createTreeMesh();
+                    mesh.position.set(rx, ry, rz);
+                } else if (rand < 0.85) {
+                    type = 'stone';
+                    mesh = createRockMesh(false);
+                    mesh.position.set(rx, ry + 0.6, rz);
+                } else {
+                    type = 'gold';
+                    mesh = createRockMesh(true);
+                    mesh.position.set(rx, ry + 0.5, rz);
+                }
+
+                scene.add(mesh);
+                objectsPool.push({
+                    id: i,
+                    type: type,
+                    mesh: mesh,
+                    hp: type === 'gold' ? 5 : 3,
+                    pos: new THREE.Vector3(rx, ry, rz)
+                });
+            }
+        }
+
+        // ==========================================
+        // 5. ENHANCED PLAYER AVATAR & PET
+        // ==========================================
+        function createPlayerAvatar() {
+            const group = new THREE.Group();
+            
+            // Player Body Mesh (Capsule shape using Cylinder + Spheres for compatibility)
+            const bodyGroup = new THREE.Group();
+            const cylinderGeo = new THREE.CylinderGeometry(0.5, 0.5, 0.8, 16);
+            const capGeo = new THREE.SphereGeometry(0.5, 16, 16);
+            const bodyMat = new THREE.MeshStandardMaterial({ color: 0x4f46e5, roughness: 0.3, metalness: 0.2 });
+            
+            const mid = new THREE.Mesh(cylinderGeo, bodyMat);
+            mid.position.y = 1.1;
+            mid.castShadow = true;
+            bodyGroup.add(mid);
+
+            const topCap = new THREE.Mesh(capGeo, bodyMat);
+            topCap.position.y = 1.5;
+            topCap.castShadow = true;
+            bodyGroup.add(topCap);
+
+            const botCap = new THREE.Mesh(capGeo, bodyMat);
+            botCap.position.y = 0.7;
+            botCap.castShadow = true;
+            bodyGroup.add(botCap);
+
+            group.add(bodyGroup);
+
+            // Glowing Eyes Helmet
+            const headGeo = new THREE.SphereGeometry(0.38, 16, 16);
+            const headMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.4 });
+            const head = new THREE.Mesh(headGeo, headMat);
+            head.position.y = 2.0;
+            head.castShadow = true;
+
+            const eyeGeo = new THREE.BoxGeometry(0.25, 0.08, 0.1);
+            const eyeMat = new THREE.MeshStandardMaterial({ color: 0x38bdf8, emissive: 0x38bdf8, emissiveIntensity: 1.0 });
+            const eyes = new THREE.Mesh(eyeGeo, eyeMat);
+            eyes.position.set(0, 2.05, 0.32);
+            head.add(eyes);
+
+            group.add(head);
+
+            playerMesh = group;
+            scene.add(playerMesh);
+            playerMesh.position.set(0, 5, 0);
+        }
+
+        function createPetCompanion() {
+            const geo = new THREE.IcosahedronGeometry(0.35, 1);
+            const mat = new THREE.MeshStandardMaterial({ color: 0x38bdf8, emissive: 0x0284c7, emissiveIntensity: 0.9, roughness: 0.2 });
+            petMesh = new THREE.Mesh(geo, mat);
+            petMesh.visible = false;
+            scene.add(petMesh);
+        }
+
+        // ==========================================
+        // 7. ANIMATION & ADVANCED LIGHTING LOOP
+        // ==========================================
+        function animate() {
+            requestAnimationFrame(animate);
+            if (!GAME.started) return;
+
+            const delta = clock.getDelta();
+            const timeSeconds = clock.getElapsedTime();
+
+            // Water animation
+            if (waterMesh) {
+                waterMesh.position.y = -1.2 + Math.sin(timeSeconds * 1.5) * 0.12;
+            }
+
+            // Cloud drifting animation
+            if (cloudsGroup) {
+                cloudsGroup.rotation.y += delta * 0.01;
+            }
+
+            updateTimeOfDay(delta);
+            updatePlayerMovement(delta);
+            updateParticles(delta);
+            updatePetMovement();
+
+            renderer.render(scene, camera);
+        }
+
+        function updateTimeOfDay(delta) {
+            GAME.time += delta * GAME.daySpeed;
+            if (GAME.time >= 24) GAME.time = 0;
+
+            const clockTxt = `${Math.floor(GAME.time).toString().padStart(2, '0')}:00`;
+            document.getElementById('clock-text').innerText = clockTxt;
+
+            // Celestial Smooth Arc Movement
+            const angle = (GAME.time / 24) * Math.PI * 2;
+            dirLight.position.x = Math.cos(angle) * 180;
+            dirLight.position.y = Math.sin(angle) * 180;
+            dirLight.position.z = Math.sin(angle * 0.5) * 60;
+
+            sunLightMesh.position.copy(dirLight.position);
+
+            const isNight = GAME.time < 6 || GAME.time > 18;
+            if (isNight !== GAME.isNight) {
+                GAME.isNight = isNight;
+                document.getElementById('clock-icon').className = isNight ? "fa-solid fa-moon text-indigo-400 animate-pulse" : "fa-solid fa-sun text-amber-400 animate-pulse";
+                
+                const fogColor = isNight ? 0x090d16 : 0x38bdf8;
+                scene.fog.color.setHex(fogColor);
+                scene.background.setHex(fogColor);
+                ambientLight.intensity = isNight ? 0.15 : 0.45;
+                dirLight.intensity = isNight ? 0.2 : 1.6;
+
+                // Random Blood Moon Event
+                if (isNight && Math.random() < 0.35) {
+                    GAME.bloodMoon = true;
+                    document.getElementById('blood-moon-fx').classList.remove('hidden');
+                    scene.fog.color.setHex(0x450a0a);
+                    showToast("BLOOD MOON RISES! Fiery nights active!", "fa-skull-crossbones");
+                } else {
+                    GAME.bloodMoon = false;
+                    document.getElementById('blood-moon-fx').classList.add('hidden');
+                }
+            }
+        }
+
+        function updatePlayerMovement(delta) {
+            // Yaw Rotation
+            playerMesh.rotation.y = cameraYaw;
+
+            // Velocity Vector
+            const moveDir = new THREE.Vector3();
+            if (controls.forward) moveDir.z -= 1;
+            if (controls.backward) moveDir.z += 1;
+            if (controls.left) moveDir.x -= 1;
+            if (controls.right) moveDir.x += 1;
+            moveDir.normalize();
+            moveDir.applyAxisAngle(new THREE.Vector3(0, 1, 0), cameraYaw);
+
+            const speed = GAME.player.speed;
+            playerMesh.position.x += moveDir.x * speed * delta;
+            playerMesh.position.z += moveDir.z * speed * delta;
+
+            // Gravity & Jump Physics
+            playerVelocity.y -= 25 * delta;
+            playerMesh.position.y += playerVelocity.y * delta;
+
+            // Terrain Height Collisions
+            const terrainY = pseudoNoise(playerMesh.position.x, playerMesh.position.z, GAME.seed) + 1.1;
+            if (playerMesh.position.y <= terrainY) {
+                playerMesh.position.y = terrainY;
+                playerVelocity.y = 0;
+                isGrounded = true;
+            }
+
+            // Camera Follow Modes (1st Person vs 3rd Person)
+            if (GAME.thirdPerson) {
+                const camOffset = new THREE.Vector3(0, 2.5, 5).applyAxisAngle(new THREE.Vector3(0, 1, 0), cameraYaw);
+                camera.position.copy(playerMesh.position).add(camOffset);
+                camera.lookAt(playerMesh.position.clone().add(new THREE.Vector3(0, 1.5, 0)));
+            } else {
+                // First Person Camera inside player head
+                camera.position.copy(playerMesh.position).add(new THREE.Vector3(0, 1.8, 0));
+                camera.rotation.set(cameraPitch, cameraYaw, 0, 'YXZ');
+            }
+        }
+
+        function updatePetMovement() {
+            if (!GAME.player.petActive || !petMesh) return;
+            petMesh.visible = true;
+            const targetPos = playerMesh.position.clone().add(new THREE.Vector3(1.2, 1.5, -1.2));
+            petMesh.position.lerp(targetPos, 0.08);
+            petMesh.rotation.y += 0.03;
+        }
+
+        function updateParticles(delta) {
+            for (let i = particlesPool.length - 1; i >= 0; i--) {
+                const p = particlesPool[i];
+                p.mesh.position.addScaledVector(p.vel, delta);
+                p.life -= delta;
+                if (p.life <= 0) {
+                    scene.remove(p.mesh);
+                    particlesPool.splice(i, 1);
+                }
+            }
+        }
+
+        // ==========================================
+        // 8. QUESTS, PROGRESSION & UI BINDINGS
+        // ==========================================
+        function addXP(amount) {
+            GAME.player.xp += amount;
+            if (GAME.player.xp >= GAME.player.nextXp) {
+                GAME.player.level++;
+                GAME.player.xp -= GAME.player.nextXp;
+                GAME.player.nextXp = Math.floor(GAME.player.nextXp * 1.5);
+                audio.playLevelUp();
+                showToast(`LEVEL UP! REACHED LEVEL ${GAME.player.level}`, 'fa-circle-up');
+            }
+            document.getElementById('player-level').innerText = GAME.player.level;
+            const pct = Math.min(100, (GAME.player.xp / GAME.player.nextXp) * 100);
+            document.getElementById('xp-bar').style.width = `${pct}%`;
+        }
+
+        function updateQuestUI() {
+            if (GAME.questProgress >= GAME.questTarget) {
+                addXP(100);
+                GAME.resources.gold += 30;
+                showToast("QUEST COMPLETED! +30 GOLD", "fa-trophy");
+                
+                // Pick next random quest
+                const types = ['wood', 'stone', 'gold'];
+                GAME.currentQuestType = types[Math.floor(Math.random() * types.length)];
+                GAME.questProgress = 0;
+                GAME.questTarget = 15;
+                
+                document.getElementById('quest-desc').innerText = `Harvest ${GAME.questTarget} ${GAME.currentQuestType.toUpperCase()} nodes.`;
+                updateInventoryUI();
+            }
+            const pct = Math.min(100, (GAME.questProgress / GAME.questTarget) * 100);
+            document.getElementById('quest-progress-bar').style.width = `${pct}%`;
+        }
+
+        function renderHotbar() {
+            const container = document.getElementById('hotbar-container');
+            container.innerHTML = '';
+            HOTBAR_SLOTS.forEach((slot, index) => {
+                const isActive = index === GAME.player.selectedHotbarSlot;
+                const el = document.createElement('div');
+                el.className = `w-12 h-12 md:w-14 md:h-14 rounded-xl glass-panel border flex flex-col items-center justify-center relative cursor-pointer transition-all ${isActive ? 'slot-active border-amber-400 bg-amber-500/20' : 'border-slate-700/80 hover:border-slate-500'}`;
+                el.onclick = () => selectHotbarSlot(index);
+
+                el.innerHTML = `
+                    <span class="absolute top-1 left-1.5 text-[10px] font-black text-slate-400">${index + 1}</span>
+                    <i class="fa-solid ${slot.icon} text-lg md:text-xl ${isActive ? 'text-amber-300' : 'text-slate-300'}"></i>
+                `;
+                container.appendChild(el);
+            });
+        }
+
+        function selectHotbarSlot(index) {
+            GAME.player.selectedHotbarSlot = index;
+            renderHotbar();
+            const item = HOTBAR_SLOTS[index];
+            showToast(`Equipped: ${item.name}`, 'fa-hand');
+        }
+
+        function updateInventoryUI() {
+            // Resources Grid
+            const grid = document.getElementById('resources-grid');
+            grid.innerHTML = '';
+            Object.keys(GAME.resources).forEach(res => {
+                grid.innerHTML += `
+                    <div class="glass-panel p-3 rounded-2xl flex items-center justify-between border-slate-800">
+                        <span class="text-xs font-bold text-slate-300 uppercase tracking-wider">${res}</span>
+                        <span class="text-base font-black text-amber-400">${GAME.resources[res]}</span>
+                    </div>
+                `;
+            });
+
+            // Crafting Recipes List
+            const recipeList = document.getElementById('crafting-recipes-list');
+            recipeList.innerHTML = '';
+            RECIPES.forEach(recipe => {
+                let canCraft = true;
+                let costString = [];
+                Object.keys(recipe.costs).forEach(k => {
+                    costString.push(`${recipe.costs[k]} ${k}`);
+                    if ((GAME.resources[k] || 0) < recipe.costs[k]) canCraft = false;
+                });
+
+                const itemEl = document.createElement('div');
+                itemEl.className = `glass-panel p-3 rounded-2xl flex items-center justify-between border-slate-800 hover:border-indigo-500/50 transition`;
+                itemEl.innerHTML = `
+                    <div class="flex items-center gap-3">
+                        <div class="w-10 h-10 rounded-xl bg-slate-800 flex items-center justify-center text-indigo-400">
+                            <i class="fa-solid ${recipe.icon}"></i>
+                        </div>
+                        <div>
+                            <div class="text-sm font-bold text-slate-200">${recipe.name}</div>
+                            <div class="text-[11px] text-slate-400">${costString.join(', ')}</div>
+                        </div>
+                    </div>
+                    <button class="px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition ${canCraft ? 'bg-indigo-600 hover:bg-indigo-500 text-white cursor-pointer' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}" ${canCraft ? '' : 'disabled'}>
+                        CRAFT
+                    </button>
+                `;
+                itemEl.querySelector('button').onclick = () => craftItem(recipe);
+                recipeList.appendChild(itemEl);
+            });
+
+            document.getElementById('shop-gold-amount').innerText = `${GAME.resources.gold} Gold`;
+        }
+
+        function craftItem(recipe) {
+            Object.keys(recipe.costs).forEach(k => {
+                GAME.resources[k] -= recipe.costs[k];
+            });
+            audio.playCraft();
+            showToast(`Crafted ${recipe.name}!`, 'fa-hammer');
+            if (recipe.id === 'wooden_axe') GAME.player.miningPower = 2.5;
+            if (recipe.id === 'stone_pickaxe') GAME.player.miningPower = 4.0;
+            updateInventoryUI();
+        }
+
+        function renderShopUI() {
+            const grid = document.getElementById('shop-items-grid');
+            grid.innerHTML = '';
+            SHOP_ITEMS.forEach(item => {
+                const isOwned = GAME.activeCosmetics.includes(item.id);
+                grid.innerHTML += `
+                    <div class="glass-panel p-4 rounded-2xl flex flex-col justify-between gap-4 border-slate-800">
+                        <div class="flex flex-col gap-2">
+                            <div class="w-12 h-12 rounded-2xl bg-gradient-to-tr ${item.color} flex items-center justify-center text-white text-xl shadow-lg">
+                                <i class="fa-solid ${item.icon}"></i>
+                            </div>
+                            <div class="font-bold text-slate-200">${item.name}</div>
+                            <div class="text-xs text-slate-400">${item.desc}</div>
+                        </div>
+                        <button onclick="buyShopItem('${item.id}', ${item.cost})" class="w-full py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition ${isOwned ? 'bg-emerald-600/30 text-emerald-400 cursor-default' : 'bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 hover:to-yellow-400 text-slate-950 shadow-md cursor-pointer'}">
+                            ${isOwned ? 'OWNED' : `BUY (${item.cost} GOLD)`}
+                        </button>
+                    </div>
+                `;
+            });
+        }
+
+        window.buyShopItem = function(id, cost) {
+            if (GAME.activeCosmetics.includes(id)) return;
+            if (GAME.resources.gold >= cost) {
+                GAME.resources.gold -= cost;
+                GAME.activeCosmetics.push(id);
+                if (id === 'pet_drone') GAME.player.petActive = true;
+                audio.playLevelUp();
+                showToast("UNLOCKED VIP COSMETIC!", "fa-crown");
+                updateInventoryUI();
+                renderShopUI();
+            } else {
+                showToast("Not enough Gold coins!", "fa-coins");
+            }
+        };
+
+        // Watch Simulated Video Ad Reward Button
+        document.getElementById('btn-watch-ad').onclick = () => {
+            showToast("Watching Sponsor Ad...", "fa-film");
+            setTimeout(() => {
+                GAME.resources.gold += 150;
+                audio.playLevelUp();
+                showToast("REWARD RECEIVED: +150 GOLD!", "fa-coins");
+                updateInventoryUI();
+                renderShopUI();
+            }, 1200);
+        };
+
+        // Utility Modal Toggle System
+        function toggleModal(modalId) {
+            const el = document.getElementById(modalId);
+            const isHidden = el.classList.contains('hidden');
+            document.querySelectorAll('#modal-inventory, #modal-shop').forEach(m => m.classList.add('hidden'));
+            if (isHidden) {
+                el.classList.remove('hidden');
+                document.exitPointerLock();
+                updateInventoryUI();
+                renderShopUI();
+            } else {
+                el.classList.add('hidden');
+            }
+        }
+
+        document.getElementById('btn-close-inv').onclick = () => toggleModal('modal-inventory');
+        document.getElementById('btn-close-shop').onclick = () => toggleModal('modal-shop');
+
+        function showToast(msg, icon = 'fa-star') {
+            const banner = document.getElementById('toast-banner');
+            document.getElementById('toast-msg').innerText = msg;
+            document.getElementById('toast-icon').className = `fa-solid ${icon} text-amber-400 text-lg`;
+            banner.classList.remove('opacity-0', '-translate-y-12');
+            banner.classList.add('opacity-100', 'translate-y-0');
+            setTimeout(() => {
+                banner.classList.remove('opacity-100', 'translate-y-0');
+                banner.classList.add('opacity-0', '-translate-y-12');
+            }, 2500);
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        // ==========================================
+        // 9. GAME INITIALIZATION
+        // ==========================================
+        document.getElementById('btn-random-seed').onclick = () => {
+            const s = Math.floor(Math.random() * 90000) + 10000;
+            document.getElementById('seed-input').value = s;
+        };
+
+        document.getElementById('btn-start').onclick = () => {
+            const seedVal = parseInt(document.getElementById('seed-input').value) || 84920;
+            GAME.seed = seedVal;
+            document.getElementById('world-seed-text').innerText = `Seed: #${seedVal}`;
+
+            audio.init();
+            initThreeScene();
+            
+            document.getElementById('start-overlay').classList.add('hidden');
+            GAME.started = true;
+            renderHotbar();
+            updateInventoryUI();
+            
+            // Lock pointer
+            document.getElementById('game-canvas').click();
+            animate();
+        };
+    </script>
+</body>
+</html>
